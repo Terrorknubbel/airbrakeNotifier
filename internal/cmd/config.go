@@ -43,9 +43,5 @@ func newConfig() (*Config, error) {
 		return nil, errors.New("apiToken is missing")
 	}
 
-	if c.projects[0].Severity == "" {
-		c.projects[0].Severity = "error"
-	}
-
 	return c, nil
 }
