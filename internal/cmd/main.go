@@ -1,7 +1,7 @@
 package cmd
 
 func Main() {
-	c, err := NewConfig()
+	c, err := newConfig()
 	if err != nil {
 		panic(err.Error())
 	}

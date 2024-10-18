@@ -8,16 +8,17 @@ import (
 )
 
 type Config struct {
-	airbrakeToken string
+	apiToken string
 	projects []Project
 }
 
 type Project struct {
 	ProjectId string
 	Severity string
+	PollingInterval int
 }
 
-func NewConfig() (*Config, error) {
+func newConfig() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("/home/wolfgang/.config/airbrakeNotify")
@@ -27,7 +28,7 @@ func NewConfig() (*Config, error) {
 	}
 
 	c := &Config{
-		airbrakeToken: viper.GetString("airbrakeToken"),
+		apiToken: viper.GetString("apiToken"),
 	}
 
 	var projects []Project
@@ -38,8 +39,8 @@ func NewConfig() (*Config, error) {
 
 	c.projects = projects
 
-	if c.airbrakeToken == "" {
-		return nil, errors.New("airbrakeToken is missing")
+	if c.apiToken == "" {
+		return nil, errors.New("apiToken is missing")
 	}
 
 	if c.projects[0].Severity == "" {
