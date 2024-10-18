@@ -15,6 +15,7 @@ type Config struct {
 type Project struct {
 	ProjectId string
 	Severity string
+	Resolved bool
 	PollingInterval int
 }
 

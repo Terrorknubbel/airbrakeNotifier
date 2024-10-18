@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -12,7 +13,7 @@ func poll(project Project, token string, airbrakeRespChan chan AirbrakeGroup) {
 	knownErrors := make(map[string]int)
 
 	for range time.Tick(time.Second * time.Duration(project.PollingInterval)) {
-		airbrakeUrl, err := url.Parse("https://api.airbrake.io/api/v4/projects/" + project.ProjectId + "/groups?resolved=false")
+		airbrakeUrl, err := url.Parse("https://api.airbrake.io/api/v4/projects/" + project.ProjectId + "/groups?resolved=" + strconv.FormatBool(project.Resolved))
 		if err != nil {
 			panic(err.Error())
 		}
