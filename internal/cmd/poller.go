@@ -2,52 +2,115 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 )
 
-func poll(project Project, token string, airbrakeRespChan chan AirbrakeGroup) {
-	knownErrors := make(map[string]int)
+type airbrakePoller struct {
+	client    *http.Client
+	project   Project
+	token     string
+	baseURL   string
+	knownErrs map[string]int
+}
 
-	for range time.Tick(time.Second * time.Duration(project.PollingInterval)) {
-		airbrakeUrl, err := url.Parse("https://api.airbrake.io/api/v4/projects/" + project.ProjectId + "/groups?resolved=" + strconv.FormatBool(project.Resolved))
-		if err != nil {
-			panic(err.Error())
-		}
+type PollError struct {
+	ProjectId string
+	Error string
+}
 
-		query := airbrakeUrl.Query()
-		query.Set("severity", project.Severity)
-		query.Set("key", token)
+func newAirbrakePoller(project Project, token string) *airbrakePoller {
+	return &airbrakePoller{
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+		project:   project,
+		token:     token,
+		baseURL:   "https://api.airbrake.io/api/v4",
+		knownErrs: make(map[string]int),
+	}
+}
 
-		airbrakeUrl.RawQuery = query.Encode()
+func (ap *airbrakePoller) startPolling(resultChan chan<- AirbrakeGroup, errChan chan<- PollError, wg *sync.WaitGroup) {
+	ticker := time.NewTicker(time.Duration(ap.project.PollingInterval) * time.Second)
+	defer ticker.Stop()
+	defer wg.Done()
 
-		resp := getJson(airbrakeUrl.String())
-		for _, group := range resp.Groups {
-			if knownErrors[group.Id] == 0 || knownErrors[group.Id] < group.NoticeTotalCount {
-				knownErrors[group.Id] = group.NoticeTotalCount
-				airbrakeRespChan <- group
-			}
+	for range ticker.C {
+		if err := ap.pollOnce(resultChan); err != nil {
+			errChan <- PollError{ap.project.ProjectId, err.Error()}
+			return
 		}
 	}
 }
 
-func getJson(url string) AirbrakeResp {
-	r, err := http.Get(url)
+func (ap *airbrakePoller) pollOnce(resultChan chan<- AirbrakeGroup) error {
+	url, err := ap.buildURL()
+
 	if err != nil {
-			panic(err.Error())
+		return fmt.Errorf("failed to build URL: %w", err)
 	}
-	defer r.Body.Close()
-
-	body, err := io.ReadAll(r.Body)
+	fmt.Println("polling", ap.project.ProjectId)
+	resp, err := ap.fetchAirbrakeData(url)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
-	var resp AirbrakeResp
-	json.Unmarshal(body, &resp)
+	ap.processGroups(resp.Groups, resultChan)
+	return nil
+}
 
-	return resp
+func (ap *airbrakePoller) buildURL() (string, error) {
+	endpoint := fmt.Sprintf("%s/projects/%s/groups", ap.baseURL, ap.project.ProjectId)
+
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+
+	query := u.Query()
+	query.Set("resolved", strconv.FormatBool(ap.project.Resolved))
+	query.Set("severity", ap.project.Severity)
+	query.Set("key", ap.token)
+	u.RawQuery = query.Encode()
+
+	return u.String(), nil
+}
+
+func (ap *airbrakePoller) fetchAirbrakeData(url string) (*AirbrakeResp, error) {
+	resp, err := ap.client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result AirbrakeResp
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (ap *airbrakePoller) processGroups(groups []AirbrakeGroup, resultChan chan<- AirbrakeGroup) {
+	for _, group := range groups {
+		if ap.knownErrs[group.Id] == 0 || ap.knownErrs[group.Id] < group.NoticeTotalCount {
+			ap.knownErrs[group.Id] = group.NoticeTotalCount
+			resultChan <- group
+		}
+	}
 }

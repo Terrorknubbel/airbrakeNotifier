@@ -4,6 +4,8 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"sync"
+
 	"github.com/gen2brain/beeep"
 )
 
@@ -33,39 +35,60 @@ type AirbrakeContext struct {
 func startNotifier(c *Config) {
 	c.withAirbrakeLogo(func(logo *os.File) {
 		airbrakeRespChan := make(chan AirbrakeGroup)
-
-		go func() {
-			for resp := range airbrakeRespChan {
-				projectId := fmt.Sprintf("%d", resp.ProjectId)
-				groupId := resp.Id
-				severity := resp.Context.Severity
-				environment := resp.Context.Environment
-
-				var titleIcon string
-
-				for _, respError := range resp.Errors {
-					switch severity {
-					case "notice":
-						titleIcon = "⚠️"
-					default:
-						titleIcon = "🚨"
-					}
-
-						beeep.Notify(
-							titleIcon + " Airbrake " + severity + " " + titleIcon,
-							environment + ": " + respError.Type + "\nhttps://adigi.airbrake.io/projects/" + projectId + "/groups/" + groupId,
-							logo.Name(),
-						)
-				}
-			}
-		}()
+		errChan := make(chan PollError)
+		var wg sync.WaitGroup
 
 		for _, project := range c.projects {
-			go poll(project, c.apiToken, airbrakeRespChan)
+			poller := newAirbrakePoller(project, c.apiToken)
+			wg.Add(1)
+			go poller.startPolling(airbrakeRespChan, errChan, &wg)
 		}
 
-		select {}
+		go func() {
+			wg.Wait()
+			close(airbrakeRespChan)
+			close(errChan)
+		}()
+
+		for {
+			select {
+			case data := <-airbrakeRespChan:
+				go c.notify(data, logo)
+			case pollError, ok := <-errChan:
+				if ok {
+					fmt.Printf("Poller stopped, project %s: %s\n", pollError.ProjectId, pollError.Error)
+				} else {
+					fmt.Println("All pollers stopped")
+					return
+				}
+			}
+		}
 	})
+}
+
+func getSeverityIcon(severity string) string {
+	if severity == "notice" {
+		return "⚠️"
+	}
+	return "🚨"
+}
+
+func (c *Config) notify(resp AirbrakeGroup, logo *os.File) {
+	projectId := fmt.Sprintf("%d", resp.ProjectId)
+	groupId := resp.Id
+	severity := resp.Context.Severity
+	titleIcon := getSeverityIcon(severity)
+	environment := resp.Context.Environment
+
+	title := fmt.Sprintf("%s Airbrake %s %s", titleIcon, severity, titleIcon)
+
+	for _, respError := range resp.Errors {
+		message := fmt.Sprintf(
+			"%s: %s\nhttps://adigi.airbrake.io/projects/%s/groups/%s", environment, respError.Type, projectId, groupId,
+		)
+
+		beeep.Notify(title, message, logo.Name())
+	}
 }
 
 //go:embed assets/airbrakeLogo.png
