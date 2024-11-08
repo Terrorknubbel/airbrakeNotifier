@@ -56,9 +56,9 @@ func startNotifier(c *Config) {
 				go c.notify(data, logo)
 			case pollError, ok := <-errChan:
 				if ok {
-					fmt.Printf("Poller stopped, project %s: %s\n", pollError.ProjectId, pollError.Error)
+					c.logger.Errorf("Poller stopped, project: %s, %s", pollError.ProjectId, pollError.Error)
 				} else {
-					fmt.Println("All pollers stopped")
+					c.logger.Warnf("All pollers stopped. Exiting…")
 					return
 				}
 			}

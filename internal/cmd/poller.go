@@ -55,7 +55,7 @@ func (ap *airbrakePoller) pollOnce(resultChan chan<- AirbrakeGroup) error {
 	if err != nil {
 		return fmt.Errorf("failed to build URL: %w", err)
 	}
-	fmt.Println("polling", ap.project.ProjectId)
+
 	resp, err := ap.fetchAirbrakeData(url)
 	if err != nil {
 		return err
@@ -90,7 +90,7 @@ func (ap *airbrakePoller) fetchAirbrakeData(url string) (*AirbrakeResp, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected HTTP status code: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
